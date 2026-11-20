@@ -1,48 +1,49 @@
 #!/usr/bin/env python3
-"""Entrypoint for the news-image-20261120 make.fun entry.
+"""Deliver the Twenty front page.
 
-Copies the built entry.png into $MAKEFUN_OUTPUT_DIR (default /output),
-verifies it is a PNG of at most 1 MiB whose SHA-256 matches the expected
-value, and prints what it wrote. Exits non-zero on any mismatch.
+build_art.py paints entry.png; this script is the handoff. It drops the
+painted page into the directory the harness reads, and refuses to hand
+over anything unless the bytes are exactly the page the builder made:
+right format, right size, right fingerprint.
 """
-import hashlib
-import os
-import shutil
-import sys
-from pathlib import Path
+import os as _os
+import pathlib
+import sys as _sys
+from hashlib import sha256
+from shutil import copyfile
 
-EXPECTED_SHA256 = "9d5177974de3462a9238cde0812a0052c63c68ca95b3af83cb7c9f2edb33b11a"
-MAX_BYTES = 1_048_576
+# fingerprint of entry.png exactly as build_art.py paints it — repaint and
+# this value changes, so the handoff refuses the new bytes until it is set.
+WANT = "9d5177974de3462a9238cde0812a0052c63c68ca95b3af83cb7c9f2edb33b11a"
+CEILING = 1048576
+MAGIC = b"\x89PNG\r\n\x1a\n"
 
 
-def main():
-    here = Path(__file__).resolve().parent
-    src = here / "entry.png"
-    out_dir = Path(os.environ.get("MAKEFUN_OUTPUT_DIR", "/output"))
-    out_dir.mkdir(parents=True, exist_ok=True)
-    dst = out_dir / "entry.png"
+def fail(message):
+    print("twenty: " + message, file=_sys.stderr)
+    return 1
 
-    if not src.is_file():
-        print(f"error: {src} not found; run build_art.py first", file=sys.stderr)
-        return 1
 
-    shutil.copyfile(src, dst)
-    data = dst.read_bytes()
-    if len(data) > MAX_BYTES:
-        print(f"error: entry.png is {len(data)} bytes, over the 1 MiB limit",
-              file=sys.stderr)
-        return 1
-    if not data.startswith(b"\x89PNG\r\n\x1a\n"):
-        print("error: entry.png is not a PNG", file=sys.stderr)
-        return 1
-    sha = hashlib.sha256(data).hexdigest()
-    if sha != EXPECTED_SHA256:
-        print(f"error: SHA-256 mismatch: got {sha}, expected {EXPECTED_SHA256}",
-              file=sys.stderr)
-        return 1
-    print(f"Wrote {dst} ({len(data)} bytes, sha256 {sha})")
+def run():
+    root = pathlib.Path(__file__).resolve().parent
+    src = root / "entry.png"
+    if not src.exists():
+        return fail("entry.png is missing — run build_art.py first")
+    target_dir = pathlib.Path(_os.environ.get("MAKEFUN_OUTPUT_DIR", "/output"))
+    target_dir.mkdir(parents=True, exist_ok=True)
+    dst = target_dir / "entry.png"
+    copyfile(src, dst)
+    blob = dst.read_bytes()
+    if len(blob) > CEILING:
+        return fail(f"entry.png is {len(blob)} bytes, over the 1 MiB ceiling")
+    if blob[:8] != MAGIC:
+        return fail("entry.png is not a PNG file")
+    got = sha256(blob).hexdigest()
+    if got != WANT:
+        return fail(f"fingerprint mismatch: got {got}")
+    print(f"twenty: wrote {dst} ({len(blob)} bytes, sha256 {got})")
     return 0
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    raise SystemExit(run())
