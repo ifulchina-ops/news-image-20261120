@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Deliver the Twenty front page.
+"""Deliver the Twenty-One front page.
 
 build_art.py paints entry.png; this script is the handoff. It drops the
 painted page into the directory the harness reads, and refuses to hand
@@ -14,13 +14,13 @@ from shutil import copyfile
 
 # fingerprint of entry.png exactly as build_art.py paints it — repaint and
 # this value changes, so the handoff refuses the new bytes until it is set.
-WANT = "9d5177974de3462a9238cde0812a0052c63c68ca95b3af83cb7c9f2edb33b11a"
+WANT = "2f928644c427344fceb1dd1d0af13a8d6a034d4d761545be7e2dfae393f0fa74"
 CEILING = 1048576
 MAGIC = b"\x89PNG\r\n\x1a\n"
 
 
 def fail(message):
-    print("twenty: " + message, file=_sys.stderr)
+    print("twenty-one: " + message, file=_sys.stderr)
     return 1
 
 
@@ -41,7 +41,7 @@ def run():
     got = sha256(blob).hexdigest()
     if got != WANT:
         return fail(f"fingerprint mismatch: got {got}")
-    print(f"twenty: wrote {dst} ({len(blob)} bytes, sha256 {got})")
+    print(f"twenty-one: wrote {dst} ({len(blob)} bytes, sha256 {got})")
     return 0
 
 
