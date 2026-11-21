@@ -1,248 +1,273 @@
 #!/usr/bin/env python3
-"""Draw the news-image-20261120 entry, round 3: one broadsheet front page
-that sums up Saturday 21 November 2026 in a single image.
+"""Paint the Twenty-One front page for Saturday 21 November 2026.
 
-Nine stories, all as reported on 21 November 2026 (The Daily Short,
-SimpleLife.news, One Turn, Global Advisors, The Paris Eye, Observer Voice):
-the 6.8 Junin earthquake, the Wall Street correction, Russian missiles in
-Poland, Anthropic's record IPO, Cyclone Akvan's landfall, the UK-EU deals,
-the Mailchimp sale, KL Rahul's SENA century, and the Gaza aid call, plus
-briefs from India and the FBI probe.
+A single 1024x1024 broadsheet page, drawn with Pillow and the DejaVu
+family. The nameplate carries the date; the lead story is the
+magnitude 6.8 earthquake in Junin, Peru, with an AI-generated
+illustration of the reported scene as the lead photo (captioned as an
+illustration); below it sit the Wall Street correction, the missiles
+in Poland, Anthropic's record IPO and Cyclone Akvan, a black strip of
+the day's numbers, and six briefs. Every story is as reported on
+21 November 2026; nothing is invented.
 
-The lead story carries a photo: lead.jpg, an AI-generated illustration of
-the reported quake scene in Junin, produced for this entry (no real
-photograph is claimed). Everything else is drawn deterministically with
-PIL + DejaVu. Writes entry.png (1024x1024) next to this script. Every
-section asserts it stays inside its vertical band, so a too-long story
-fails loudly instead of overlapping the next one.
+Run this file to repaint entry.png next to it. The render is fully
+deterministic: identical inputs give identical bytes.
 """
-from pathlib import Path
+import pathlib
 
-from PIL import Image, ImageDraw, ImageFont
+from PIL import Image
+from PIL import ImageDraw, ImageFont
 
-W, H = 1024, 1024
-MX = 34                      # side margin
-BLACK = (15, 15, 15)
-PAPER = (252, 250, 244)      # warm newsprint
-RED = (165, 12, 12)
-BLUE = (18, 52, 96)
-GREY = (96, 96, 96)
+PAGE_W, PAGE_H = 1024, 1024
+EDGE = 34
+INK = (15, 15, 15)
+NEWS = (252, 250, 244)
+ACCENT = (165, 12, 12)
+ASH = (96, 96, 96)
+FONT_DIR = pathlib.Path("/usr/share/fonts/truetype/dejavu")
 
-FONTS = Path("/usr/share/fonts/truetype/dejavu")
+PAPER_NAME = "TWENTY-ONE"
+DATELINE = "SATURDAY  •  21  NOVEMBER  2026"
+TAGLINE = "THE WORLD IN ONE PAGE  —  NINE STORIES THAT DEFINED THE DAY"
+
+LEAD_TAG = "LEAD STORY  •  JUNÍN, PERU"
+LEAD_HEAD = "6.8 quake shakes Peru, felt in Lima"
+LEAD_BODY = "A magnitude 6.8 earthquake struck the Andean region of Junín on Friday, Peru's Geophysical Institute said, shaking buildings and sending residents into the streets. Tremors were felt in the capital, Lima, around 320 km away."
+LEAD_CAPTION = "Residents outside cracked adobe homes in Junín. Illustration."
+
+MARKETS = ("NEW YORK",
+           "Stocks plunge as AI sell-off deepens",
+           "The S&P 500 and Dow entered correction territory; the Nasdaq fell 5.3% as Nvidia dropped about 14%.")
+POLAND = ("WARSAW",
+          "Russian missiles fall in Poland",
+          "Two Russian missiles and a suspected drone came down in Poland. The prime minister called it a deliberate provocation; NATO called it a grave violation.")
+ANTHROPIC = ("SAN FRANCISCO",
+             "Anthropic IPO: $119.5bn, a record",
+             "Anthropic closed the largest share debut ever at $119.5 billion, passing SpaceX's record.")
+AKVAN = ("ODISHA, INDIA",
+         "Cyclone Akvan makes landfall",
+         "Cyclone Akvan crossed the Odisha coast near Gopalpur, bringing strong winds and heavy rain.")
+
+NUMBERS = (
+    ("6.8", "quake in Junín, Peru"),
+    ("-5.3%", "Nasdaq in one day"),
+    ("$119.5BN", "Anthropic IPO record"),
+    ("320 KM", "tremors felt, to Lima"),
+    ("$3.68BN", "Mailchimp sale price"),
+)
+
+BRIEFS = (
+    "UK and EU sign deals on food, carbon and youth mobility.",
+    "Intuit sells Mailchimp for $3.68bn, a third of its 2021 price.",
+    "KL Rahul's ton completes the SENA set in Wellington.",
+    "Four nations urge Israel to let aid reach flooded Gaza.",
+    "India's NSE becomes the world's fifth-largest exchange.",
+    "FBI probes suspected hack of a national crime database.",
+)
+
+FOOTER = "All stories as reported on 21 November 2026. Lead photo is an AI-generated illustration of the reported scene; drawn with PIL; no invented quotes."
 
 
-def f_serif(size):
-    return ImageFont.truetype(str(FONTS / "DejaVuSerif-Bold.ttf"), size)
+def serif(size):
+    return ImageFont.truetype(str(FONT_DIR / "DejaVuSerif-Bold.ttf"), size)
 
 
-def f_sans(size):
-    return ImageFont.truetype(str(FONTS / "DejaVuSans.ttf"), size)
+def sans(size):
+    return ImageFont.truetype(str(FONT_DIR / "DejaVuSans.ttf"), size)
 
 
-def f_sansb(size):
-    return ImageFont.truetype(str(FONTS / "DejaVuSans-Bold.ttf"), size)
+def sans_bold(size):
+    return ImageFont.truetype(str(FONT_DIR / "DejaVuSans-Bold.ttf"), size)
 
 
-def wrap_text(d, text, font, width):
-    """Greedy wrap; returns list of lines that fit `width` pixels."""
-    lines, cur = [], ""
+def fold(draw, text, font, width):
+    """Split text into lines that fit inside `width` pixels, greedily."""
+    out = []
+    current = ""
     for word in text.split():
-        trial = (cur + " " + word).strip()
-        if d.textlength(trial, font=font) <= width:
-            cur = trial
+        candidate = f"{current} {word}".strip() if current else word
+        if draw.textlength(candidate, font=font) <= width:
+            current = candidate
         else:
-            if cur:
-                lines.append(cur)
-            cur = word
-    if cur:
-        lines.append(cur)
-    return lines
+            if current:
+                out.append(current)
+            current = word
+    if current:
+        out.append(current)
+    return out
 
 
-def para(d, x, y, text, font, width, leading):
-    for line in wrap_text(d, text, font, width):
-        d.text((x, y), line, font=font, fill=BLACK)
-        y += leading
+def block(draw, x, top, text, font, width, step):
+    """Draw a wrapped paragraph; returns the y just below it."""
+    y = top
+    for line in fold(draw, text, font, width):
+        draw.text((x, y), line, font=font, fill=INK)
+        y += step
     return y
 
 
-def hline(d, y, weight=2, x0=None, x1=None):
-    d.line([(MX if x0 is None else x0, y),
-            (W - MX if x1 is None else x1, y)], fill=BLACK, width=weight)
+def rule(draw, y, weight=2, left=None, right=None):
+    """A horizontal rule across the page (or between two x bounds)."""
+    draw.line([(EDGE if left is None else left, y),
+               (PAGE_W - EDGE if right is None else right, y)],
+              fill=INK, width=weight)
 
 
-def kicker(d, x, y, text):
-    d.text((x, y), text, font=f_sansb(16), fill=RED)
-    return y + 24
+def tag(draw, x, top, text):
+    """A small red kicker line above a headline."""
+    draw.text((x, top), text, font=sans_bold(16), fill=ACCENT)
+    return top + 24
 
 
-def headline(d, x, y, text, size, width, leading):
-    return para(d, x, y, text, f_serif(size), width, leading)
+def title(draw, x, top, text, size, width, step):
+    """A serif headline, wrapped to `width`."""
+    return block(draw, x, top, text, serif(size), width, step)
 
 
-def mini_chart(d, x, y, w, h):
-    """Small plunging-line chart for the markets story (drawn, no data)."""
-    d.rectangle([x, y, x + w, y + h], outline=GREY, width=1)
-    for i in range(1, 4):
-        gy = y + h * i / 4
-        d.line([(x, gy), (x + w, gy)], fill=(220, 218, 208), width=1)
-    pts = [(0.00, 0.12), (0.12, 0.22), (0.24, 0.18), (0.36, 0.38),
-           (0.48, 0.34), (0.60, 0.55), (0.72, 0.62), (0.84, 0.78),
-           (1.00, 0.92)]
-    xy = [(x + w * px, y + h * py) for px, py in pts]
-    d.line(xy, fill=RED, width=3, joint="curve")
-    lab = "-5.3%"
-    lw = d.textlength(lab, font=f_sansb(13))
-    d.text((x + w - lw - 4, y + 3), lab, font=f_sansb(13), fill=RED)
+def plunge_chart(draw, x, top, width, height):
+    """A small falling-line chart for the markets story."""
+    draw.rectangle([x, top, x + width, top + height], outline=ASH, width=1)
+    for row in range(1, 4):
+        gy = top + height * row / 4
+        draw.line([(x, gy), (x + width, gy)], fill=(220, 218, 208), width=1)
+    trail = [(0.00, 0.12), (0.12, 0.22), (0.24, 0.18),
+             (0.36, 0.38), (0.48, 0.34), (0.60, 0.55),
+             (0.72, 0.62), (0.84, 0.78), (1.00, 0.92)]
+    points = [(x + width * fx, top + height * fy) for fx, fy in trail]
+    draw.line(points, fill=ACCENT, width=3, joint="curve")
+    label = "-5.3%"
+    label_w = draw.textlength(label, font=sans_bold(13))
+    draw.text((x + width - label_w - 4, top + 3), label,
+              font=sans_bold(13), fill=ACCENT)
 
 
-def two_col_block(d, y, left_kick, left_head, left_body,
-                  right_kick, right_head, right_body, band_end,
-                  head_size=27, head_leading=30,
-                  body_size=16, body_leading=21, left_chart=False):
-    """Two side-by-side stories; returns the y just past the block."""
-    col_w = (W - 2 * MX) // 2 - 14
-    rx = MX + col_w + 28
-    y1 = kicker(d, MX, y, left_kick)
-    y1 = headline(d, MX, y1, left_head, head_size, col_w, head_leading)
-    y1 = para(d, MX, y1 + 4, left_body, f_sans(body_size), col_w, body_leading)
-    if left_chart:
-        mini_chart(d, MX, y1 + 6, col_w, 44)
-        y1 += 56
-    y2 = kicker(d, rx, y, right_kick)
-    y2 = headline(d, rx, y2, right_head, head_size, col_w, head_leading)
-    y2 = para(d, rx, y2 + 4, right_body, f_sans(body_size), col_w, body_leading)
-    end = max(y1, y2)
-    assert end <= band_end, f"two-col block overflows band: {end} > {band_end}"
-    return end
+def side_by_side(draw, top, left, right, limit, head_size=27,
+                 head_step=30, body_size=16, body_step=21, chart=False):
+    """Render two stories next to each other; returns the y below them.
+
+    Each story is a (kicker, headline, body) triple. The block must end
+    at or above `limit`, or the page layout is broken and we fail.
+    """
+    col = (PAGE_W - 2 * EDGE) // 2 - 14
+    right_x = EDGE + col + 28
+    ly = tag(draw, EDGE, top, left[0])
+    ly = title(draw, EDGE, ly, left[1], head_size, col, head_step)
+    ly = block(draw, EDGE, ly + 4, left[2], sans(body_size), col, body_step)
+    if chart:
+        plunge_chart(draw, EDGE, ly + 6, col, 44)
+        ly += 56
+    ry = tag(draw, right_x, top, right[0])
+    ry = title(draw, right_x, ry, right[1], head_size, col, head_step)
+    ry = block(draw, right_x, ry + 4, right[2], sans(body_size), col, body_step)
+    bottom = max(ly, ry)
+    assert bottom <= limit, f"side-by-side block runs past {limit}: {bottom}"
+    return bottom
+
+
+def draw_masthead(draw):
+    """Nameplate, date line and tagline across the top of the page."""
+    title_font = serif(76)
+    title_w = draw.textlength(PAPER_NAME, font=title_font)
+    draw.text(((PAGE_W - title_w) / 2, 10), PAPER_NAME,
+              font=title_font, fill=INK)
+    rule(draw, 106, 4)
+    rule(draw, 112, 1)
+    date_font = sans_bold(24)
+    date_w = draw.textlength(DATELINE, font=date_font)
+    draw.text(((PAGE_W - date_w) / 2, 120), DATELINE,
+              font=date_font, fill=ACCENT)
+    tag_font = sans(17)
+    tag_w = draw.textlength(TAGLINE, font=tag_font)
+    draw.text(((PAGE_W - tag_w) / 2, 152), TAGLINE, font=tag_font, fill=ASH)
+    rule(draw, 180, 3)
+    rule(draw, 185, 1)
+
+
+def draw_lead(sheet, draw):
+    """The quake story: headline and body left, photo right."""
+    top = 195
+    top = tag(draw, EDGE, top, LEAD_TAG)
+    text_w = 470
+    top = title(draw, EDGE, top, LEAD_HEAD, 36, text_w, 40)
+    top = block(draw, EDGE, top + 6, LEAD_BODY, sans(17), text_w, 22)
+    assert top <= 515, f"lead story runs past its band: {top}"
+    here = pathlib.Path(__file__).resolve().parent
+    photo = Image.open(here / "lead.jpg")
+    photo = photo.convert("RGB")
+    photo = photo.resize((460, 260), Image.LANCZOS)
+    px, py = 530, 217
+    sheet.paste(photo, (px, py))
+    draw.rectangle([px, py, px + 460, py + 260], outline=INK, width=2)
+    draw.text((px, py + 266), LEAD_CAPTION, font=sans(12), fill=ASH)
+    rule(draw, 522, 2)
+
+
+def draw_numbers(draw):
+    """Black band: five figures from the day, side by side."""
+    top = 894
+    draw.rectangle([EDGE, top, PAGE_W - EDGE, top + 40], fill=INK)
+    slot = (PAGE_W - 2 * EDGE) / len(NUMBERS)
+    for idx, (big, small) in enumerate(NUMBERS):
+        centre = EDGE + slot * idx + slot / 2
+        big_font = sans_bold(19)
+        big_w = draw.textlength(big, font=big_font)
+        draw.text((centre - big_w / 2, top + 3), big,
+                  font=big_font, fill=NEWS)
+        small_font = sans(11)
+        small_w = draw.textlength(small, font=small_font)
+        draw.text((centre - small_w / 2, top + 24), small,
+                  font=small_font, fill=(210, 208, 198))
+        if idx:
+            draw.line([(EDGE + slot * idx, top + 6),
+                       (EDGE + slot * idx, top + 34)],
+                      fill=(90, 90, 90), width=1)
+
+
+def draw_briefs(draw):
+    """Six one-line briefs in two columns under a heading."""
+    top = 942
+    draw.text((EDGE, top), "THE DAY IN BRIEF", font=sans_bold(17), fill=INK)
+    rule(draw, top + 22, 1)
+    half = (PAGE_W - 2 * EDGE) // 2
+    brief_font = sans(12)
+    for item in BRIEFS:
+        assert draw.textlength(item, font=brief_font) <= half - 22, \
+            f"brief does not fit on one line: {item}"
+    first = top + 28
+    for pos, item in enumerate(BRIEFS):
+        col, row = pos % 2, pos // 2
+        x = EDGE + col * half
+        y = first + row * 13
+        draw.text((x, y), "\u2022", font=sans_bold(13), fill=ACCENT)
+        draw.text((x + 14, y), item, font=brief_font, fill=INK)
+    assert first + 2 * 13 + 13 <= 1010, "briefs run into the footer"
+
+
+def paint():
+    """Draw the whole page and return the finished image."""
+    sheet = Image.new("RGB", (PAGE_W, PAGE_H), NEWS)
+    draw = ImageDraw.Draw(sheet)
+    draw_masthead(draw)
+    draw_lead(sheet, draw)
+    side_by_side(draw, 534, MARKETS, POLAND, 740, chart=True)
+    rule(draw, 748, 1)
+    side_by_side(draw, 760, ANTHROPIC, AKVAN, 884,
+                 head_size=25, head_step=28, body_size=15, body_step=20)
+    rule(draw, 886, 1)
+    draw_numbers(draw)
+    draw_briefs(draw)
+    draw.text((EDGE, 1012), FOOTER, font=sans(10), fill=ASH)
+    return sheet
 
 
 def main():
-    img = Image.new("RGB", (W, H), PAPER)
-    d = ImageDraw.Draw(img)
-
-    # ---------- masthead (ends 185) ----------
-    name = "TWENTY-ONE"
-    tf = f_serif(76)
-    tw = d.textlength(name, font=tf)
-    d.text(((W - tw) / 2, 10), name, font=tf, fill=BLACK)
-    hline(d, 106, 4)
-    hline(d, 112, 1)
-    dateline = "SATURDAY  •  21  NOVEMBER  2026"
-    df = f_sansb(24)
-    dw = d.textlength(dateline, font=df)
-    d.text(((W - dw) / 2, 120), dateline, font=df, fill=RED)
-    tagline = "THE WORLD IN ONE PAGE  —  NINE STORIES THAT DEFINED THE DAY"
-    gf = f_sans(17)
-    gw = d.textlength(tagline, font=gf)
-    d.text(((W - gw) / 2, 152), tagline, font=gf, fill=GREY)
-    hline(d, 180, 3)
-    hline(d, 185, 1)
-
-    # ---------- lead story: Peru quake (195-515) ----------
-    y = 195
-    y = kicker(d, MX, y, "LEAD STORY  •  JUNÍN, PERU")
-    lead_w = 470
-    y = headline(d, MX, y, "6.8 quake shakes Peru, felt in Lima",
-                 36, lead_w, 40)
-    y = para(d, MX, y + 6,
-             "A magnitude 6.8 earthquake struck the Andean region of Junín "
-             "on Friday, Peru's Geophysical Institute said, shaking "
-             "buildings and sending residents into the streets. Tremors "
-             "were felt in the capital, Lima, around 320 km away.",
-             f_sans(17), lead_w, 22)
-    assert y <= 515, f"lead body overflows: {y}"
-    # lead photo, right column
-    photo = Image.open(Path(__file__).resolve().parent / "lead.jpg")
-    photo = photo.convert("RGB").resize((460, 260), Image.LANCZOS)
-    px, py = 530, 217
-    img.paste(photo, (px, py))
-    d.rectangle([px, py, px + 460, py + 260], outline=BLACK, width=2)
-    d.text((px, py + 266),
-           "Residents outside cracked adobe homes in Junín. Illustration.",
-           font=f_sans(12), fill=GREY)
-    hline(d, 522, 2)
-
-    # ---------- middle: markets + Poland (534-740) ----------
-    y = two_col_block(
-        d, 534,
-        "NEW YORK", "Stocks plunge as AI sell-off deepens",
-        "The S&P 500 and Dow entered correction territory; the Nasdaq "
-        "fell 5.3% as Nvidia dropped about 14%.",
-        "WARSAW", "Russian missiles fall in Poland",
-        "Two Russian missiles and a suspected drone came down in Poland. "
-        "The prime minister called it a deliberate provocation; NATO "
-        "called it a grave violation.",
-        740, left_chart=True)
-    hline(d, 748, 1)
-
-    # ---------- lower: Anthropic + Akvan (760-884) ----------
-    y = two_col_block(
-        d, 760,
-        "SAN FRANCISCO", "Anthropic IPO: $119.5bn, a record",
-        "Anthropic closed the largest share debut ever at $119.5 "
-        "billion, passing SpaceX's record.",
-        "ODISHA, INDIA", "Cyclone Akvan makes landfall",
-        "Cyclone Akvan crossed the Odisha coast near Gopalpur, bringing "
-        "strong winds and heavy rain.",
-        884, head_size=25, head_leading=28, body_size=15, body_leading=20)
-    hline(d, 886, 1)
-
-    # ---------- day in numbers (894-934) ----------
-    ny = 894
-    d.rectangle([MX, ny, W - MX, ny + 40], fill=BLACK)
-    nums = [("6.8", "quake in Junín, Peru"),
-            ("-5.3%", "Nasdaq in one day"),
-            ("$119.5BN", "Anthropic IPO record"),
-            ("320 KM", "tremors felt, to Lima"),
-            ("$3.68BN", "Mailchimp sale price")]
-    seg = (W - 2 * MX) / len(nums)
-    for i, (big, small) in enumerate(nums):
-        cx = MX + seg * i + seg / 2
-        bf = f_sansb(19)
-        bw = d.textlength(big, font=bf)
-        d.text((cx - bw / 2, ny + 3), big, font=bf, fill=PAPER)
-        sf = f_sans(11)
-        sw = d.textlength(small, font=sf)
-        d.text((cx - sw / 2, ny + 24), small, font=sf, fill=(210, 208, 198))
-        if i:
-            d.line([(MX + seg * i, ny + 6), (MX + seg * i, ny + 34)],
-                   fill=(90, 90, 90), width=1)
-
-    # ---------- the day in brief (942-1004) ----------
-    by = 942
-    d.text((MX, by), "THE DAY IN BRIEF", font=f_sansb(17), fill=BLACK)
-    hline(d, by + 22, 1)
-    briefs = [
-        "UK and EU sign deals on food, carbon and youth mobility.",
-        "Intuit sells Mailchimp for $3.68bn, a third of its 2021 price.",
-        "KL Rahul's ton completes the SENA set in Wellington.",
-        "Four nations urge Israel to let aid reach flooded Gaza.",
-        "India's NSE becomes the world's fifth-largest exchange.",
-        "FBI probes suspected hack of a national crime database.",
-    ]
-    half = (W - 2 * MX) // 2
-    bf = f_sans(12)
-    for item in briefs:
-        assert d.textlength(item, font=bf) <= half - 22, \
-            f"brief too long for one line: {item}"
-    iy = by + 28
-    for i, item in enumerate(briefs):
-        col = i % 2
-        row = i // 2
-        x = MX + col * half
-        yy = iy + row * 13
-        d.text((x, yy), "\u2022", font=f_sansb(13), fill=RED)
-        d.text((x + 14, yy), item, font=bf, fill=BLACK)
-    assert iy + 2 * 13 + 13 <= 1010, "briefs overflow footer"
-
-    # ---------- footer ----------
-    d.text((MX, 1012), "All stories as reported on 21 November 2026. Lead photo is an AI-generated illustration of the reported scene; drawn with PIL; no invented quotes.",
-           font=f_sans(10), fill=GREY)
-
-    out = Path(__file__).resolve().parent / "entry.png"
-    img.save(out, format="PNG", optimize=True)
-    print(f"Wrote {out} ({out.stat().st_size} bytes)")
+    here = pathlib.Path(__file__).resolve().parent
+    page = paint()
+    target = here / "entry.png"
+    page.save(target, format="PNG", optimize=True)
+    size = target.stat().st_size
+    assert size <= 1_048_576, f"entry.png is {size} bytes, over the 1 MiB ceiling"
+    print(f"Painted {target} ({size} bytes)")
 
 
 if __name__ == "__main__":

@@ -1,49 +1,53 @@
 #!/usr/bin/env python3
-"""Deliver the Twenty-One front page.
+"""Hand the painted Twenty-One page to the harness.
 
-build_art.py paints entry.png; this script is the handoff. It drops the
-painted page into the directory the harness reads, and refuses to hand
-over anything unless the bytes are exactly the page the builder made:
-right format, right size, right fingerprint.
+The page itself is painted by build_art.py; this entrypoint only moves
+entry.png into the output directory and checks the bytes before it
+reports success: PNG signature, size under the 1 MiB ceiling, and the
+SHA-256 fingerprint of the exact bytes the painter produced. If the
+painter ever changes, the fingerprint below must be updated to match
+the new bytes, or the handoff refuses them.
 """
-import os as _os
-import pathlib
-import sys as _sys
-from hashlib import sha256
-from shutil import copyfile
+import hashlib
+import os
+import shutil
+import sys
+from pathlib import Path
 
-# fingerprint of entry.png exactly as build_art.py paints it — repaint and
-# this value changes, so the handoff refuses the new bytes until it is set.
-WANT = "2f928644c427344fceb1dd1d0af13a8d6a034d4d761545be7e2dfae393f0fa74"
-CEILING = 1048576
-MAGIC = b"\x89PNG\r\n\x1a\n"
+EXPECTED_SHA256 = "2f928644c427344fceb1dd1d0af13a8d6a034d4d761545be7e2dfae393f0fa74"
+MAX_BYTES = 1_048_576
+PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
 
 
-def fail(message):
-    print("twenty-one: " + message, file=_sys.stderr)
+def die(reason):
+    print(f"twenty-one: {reason}", file=sys.stderr)
     return 1
 
 
-def run():
-    root = pathlib.Path(__file__).resolve().parent
-    src = root / "entry.png"
-    if not src.exists():
-        return fail("entry.png is missing — run build_art.py first")
-    target_dir = pathlib.Path(_os.environ.get("MAKEFUN_OUTPUT_DIR", "/output"))
-    target_dir.mkdir(parents=True, exist_ok=True)
-    dst = target_dir / "entry.png"
-    copyfile(src, dst)
-    blob = dst.read_bytes()
-    if len(blob) > CEILING:
-        return fail(f"entry.png is {len(blob)} bytes, over the 1 MiB ceiling")
-    if blob[:8] != MAGIC:
-        return fail("entry.png is not a PNG file")
-    got = sha256(blob).hexdigest()
-    if got != WANT:
-        return fail(f"fingerprint mismatch: got {got}")
-    print(f"twenty-one: wrote {dst} ({len(blob)} bytes, sha256 {got})")
+def deliver():
+    here = Path(__file__).resolve().parent
+    page = here / "entry.png"
+    if not page.is_file():
+        return die("entry.png is missing — run build_art.py first")
+    out_dir = Path(os.environ.get("MAKEFUN_OUTPUT_DIR", "/output"))
+    out_dir.mkdir(parents=True, exist_ok=True)
+    target = out_dir / "entry.png"
+    shutil.copyfile(page, target)
+    data = target.read_bytes()
+    if len(data) > MAX_BYTES:
+        return die(f"entry.png is {len(data)} bytes, over the 1 MiB ceiling")
+    if data[:8] != PNG_SIGNATURE:
+        return die("entry.png is not a PNG file")
+    width = int.from_bytes(data[16:20], "big")
+    height = int.from_bytes(data[20:24], "big")
+    if width > 1024 or height > 1024:
+        return die(f"entry.png is {width}x{height}, over the 1024x1024 limit")
+    digest = hashlib.sha256(data).hexdigest()
+    if digest != EXPECTED_SHA256:
+        return die(f"fingerprint mismatch: got {digest}")
+    print(f"twenty-one: wrote {target} ({len(data)} bytes, sha256 {digest})")
     return 0
 
 
 if __name__ == "__main__":
-    raise SystemExit(run())
+    raise SystemExit(deliver())
